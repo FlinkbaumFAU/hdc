@@ -87,12 +87,14 @@ IGNORE_DISCONNECTED_MODULES:
 # KLayout LVS. The schematic CDL needs every master: the SRAM macros (merged
 # into one file, see cdl/merge_sram_cdl.py) and the device-less bondpad. The
 # IO CDL is a copy without the broken (and unused) IOPadInOut30mA.
+# lvs/sg13cmos5l_chip.lvs is the PDK deck with IO cells and SRAM macros
+# compared as black boxes (their own PDK netlists don't match; lvs/hard_ip.rb).
 PAD_CDLS:
   - dir::cdl/sg13cmos5l_io.cdl
 EXTRA_CDLS:
   - dir::cdl/sram.cdl
   - dir::ip/bondpad_70x70/cdl/bondpad_70x70.cdl
-KLAYOUT_LVS_SCRIPT: pdk_dir::libs.tech/klayout/tech/lvs/sg13cmos5l.lvs
+KLAYOUT_LVS_SCRIPT: dir::lvs/sg13cmos5l_chip.lvs
 KLAYOUT_LVS_OPTIONS:
   run_mode: deep
 
