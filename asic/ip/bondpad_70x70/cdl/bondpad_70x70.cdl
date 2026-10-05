@@ -1,0 +1,4 @@
+* bondpad_70x70: metal only (TopMetal2 + Passiv opening over TopMetal1), no
+* devices. Needed by OpenROAD write_cdl for the KLayout LVS schematic.
+.SUBCKT bondpad_70x70 PAD
+.ENDS bondpad_70x70

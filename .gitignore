@@ -1,0 +1,17 @@
+# LibreLane runs and console logs
+asic/runs/
+asic/*.log
+asic/out.def
+
+# Simulation / tool scratch output
+asic/sim/build/
+*.cf
+*.o
+
+# One-off DRC / fill test outputs
+asic/drc/reports/
+asic/drc/filler/test/
+
+# OS / editor / agent state
+.DS_Store
+.claude/*.lock
