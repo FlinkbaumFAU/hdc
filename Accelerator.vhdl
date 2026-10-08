@@ -232,12 +232,16 @@ architecture Behavioral of Accelerator is
     signal feature_load_index  : integer range 0 to N := 0;
     signal features_ready      : STD_LOGIC := '0';
 
-    -- Majority result eines Samples (MajorityRAM)
+    -- Majority result eines Samples
+    signal majority_ram     : ram_array_type := (others => (others => '0'));
     signal maj_we           : std_logic := '0';
     signal maj_wr_addr      : integer range 0 to CHUNKS_PER_VEC-1 := 0;
     signal maj_rd_addr      : integer range 0 to CHUNKS_PER_VEC-1 := 0;
     signal maj_din          : std_logic_vector(CHUNK_WIDTH-1 downto 0) := (others => '0');
     signal maj_dout         : std_logic_vector(CHUNK_WIDTH-1 downto 0) := (others => '0');
+
+    attribute ram_style : string;
+    attribute ram_style of majority_ram : signal is "block";
 
     -- Compare FSM (Testing)
     signal comp_state   : integer range 0 to 10 := 0;
@@ -391,16 +395,16 @@ begin
 
     am_addr_mux <= am_addr;
 
-    MAJ: entity work.MajorityRAM
-        generic map (DEPTH => CHUNKS_PER_VEC, WIDTH => CHUNK_WIDTH)
-        port map (
-            clk   => clk,
-            we    => maj_we,
-            waddr => maj_wr_addr,
-            raddr => maj_rd_addr,
-            din   => maj_din,
-            dout  => maj_dout
-        );
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if maj_we = '1' then
+                majority_ram(maj_wr_addr) <= maj_din;
+            end if;
+
+            maj_dout <= majority_ram(maj_rd_addr);
+        end if;
+    end process;
 
     process(clk, reset)
     begin
