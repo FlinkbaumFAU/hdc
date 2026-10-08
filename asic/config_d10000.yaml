@@ -1,3 +1,6 @@
+# ARCHIVED: D=10000 / UART version of the chip (runs chip..chip8, commit 0fba56d).
+# The RTL and chip_top.sdc have since moved to D=1000 / SPI (config.yaml);
+# to rerun this config, check out 0fba56d.
 # Full chip (pad ring + bondpads) of hdc_word40_top for IHP SG13CMOS5L.
 # Based on https://github.com/IHP-GmbH/ihp-sg13-librelane-template (librelane/, 40ca8b9).
 meta:

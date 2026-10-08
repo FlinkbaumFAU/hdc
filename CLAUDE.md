@@ -12,7 +12,7 @@ Toolchain on PATH: `ghdl`, `yosys` (with the `ghdl` plugin), `nextpnr-himbaechel
 
 ```sh
 S=/home/michael/Documents/Passionate/hdc
-SRCS="$S/uart_rx.vhdl $S/uart_tx.vhdl $S/IdentityMemory.vhdl $S/ContinuousMemory.vhdl $S/AssociativeMemory.vhdl $S/ClassCounterRAM.vhdl $S/MajorityRAM.vhdl $S/Accelerator.vhdl $S/hdc_uart_loader.vhdl"
+SRCS="$S/spi_slave.vhdl $S/hdc_spi_loader.vhdl $S/IdentityMemory.vhdl $S/ContinuousMemory.vhdl $S/AssociativeMemory.vhdl $S/ClassCounterRAM.vhdl $S/Accelerator.vhdl $S/hdc_cmd_loader.vhdl"
 
 # Analyze + elaborate (syntax/type check). Dependency order matters: leaves first, tops last.
 ghdl -a --std=08 $SRCS $S/hdc_word40_top.vhdl $S/hdc_word40_core_top.vhdl
@@ -29,7 +29,7 @@ Expect harmless `unhandled attribute "ram_style"` warnings; the `found RAM ...` 
 
 ## Top-level entities
 
-- `hdc_word40_top` — real design: `uart_rx`/`uart_tx` ↔ `hdc_uart_loader` (command FSM) ↔ `Accelerator`. Defaults D=10000, 10 MHz clock, 115200 baud. `led_o` = `done`.
+- `hdc_word40_top` — real design: SPI (`spi_slave` → `hdc_spi_loader`) ↔ `hdc_cmd_loader` (command FSM) ↔ `Accelerator`. Defaults D=1000, 30 MHz; `G_USE_PLL` instantiates the GateMate `CC_PLL` (10 → 30 MHz, FPGA only, false on the ASIC). `led_o` = `done`. `uart_rx`/`uart_tx`/`hdc_uart_loader`/`MajorityRAM.vhdl` are left over from the UART / D=10000 version and no longer instantiated.
 - `hdc_word40_core_top` — accelerator only, driven by a free-running counter as synthetic stimulus. Used purely for resource/timing measurement (default D=1000); outputs are XOR-folded into `led_o` so nothing gets optimized away. Not functionally meaningful.
 
 ## Accelerator architecture (`Accelerator.vhdl`)
@@ -41,7 +41,7 @@ Generics: `D` (hypervector bits), `N` (features per sample, 32), `M` (quantizati
 - CM (`ContinuousMemory.vhdl`; note entity is spelled **`ContinousMemory`**) — M level HVs. `mem_sel="01"`.
 - AM (`AssociativeMemory`, K vectors) — class prototypes. `mem_sel="10"`. Written externally (load mode) or internally by finalization.
 - `ClassCounterRAM` — 11-bit signed counter per HV bit, for **one class only** (depth `CHUNKS_PER_VEC*40`). No address bounds check (to keep RAM inference); the others have sim-only asserts.
-- `MajorityRAM` — the current sample's encoded HV (separate write/read address; never read and written in the same cycle, which the ASIC single-port mapping relies on).
+- Majority RAM — the current sample's encoded HV, now an inline array in `Accelerator` (`ram_style` block; separate write/read address). On the ASIC it becomes flops (25×40 at D=1000); the `MajorityRAM` entity and `asic/rtl/MajorityRAM.vhdl` (256x48 macro) are unused.
 
 **Main FSM flow:**
 1. Features arrive via `feature_valid` into a 32-entry buffer; `features_ready` after N values, cleared on `start`.
@@ -56,7 +56,7 @@ Generics: `D` (hypervector bits), `N` (features per sample, 32), `M` (quantizati
 
 ## ASIC flow (`asic/`): full chip on IHP SG13CMOS5L
 
-Top is `hdc_chip_top` (`asic/rtl/hdc_chip_top.vhdl`): sg13cmos5l IO pad ring + bondpads around `hdc_word40_top` (instance `i_core`). The flow is LibreLane's `Chip` flow with the `VHDLClassic` substitutions applied in `config.yaml` (`Yosys.Synthesis` → `Yosys.VHDLSynthesis`, lint/JSON-header/`Odb.SetPowerConnections`/EQY removed). Based on https://github.com/IHP-GmbH/ihp-sg13-librelane-template.
+Top is `hdc_chip_top` (`asic/rtl/hdc_chip_top.vhdl`): sg13cmos5l IO pad ring + bondpads around `hdc_word40_top` (instance `i_core`, D=1000, SPI). `config.yaml` is this version and has not been run through the full flow yet (synthesis and pad ring/macros/PDN checked). `config_d10000.yaml` is the archived D=10000 / UART chip (runs chip..chip8, all signoff clean); it needs the RTL of commit `0fba56d`. Results quoted below (runtimes, DRC, antenna, LVS, timing) are from that version unless noted. The flow is LibreLane's `Chip` flow with the `VHDLClassic` substitutions applied in `config.yaml` (`Yosys.Synthesis` → `Yosys.VHDLSynthesis`, lint/JSON-header/`Odb.SetPowerConnections`/EQY removed). Based on https://github.com/IHP-GmbH/ihp-sg13-librelane-template.
 
 ```sh
 # Full run (runs land in asic/runs/<tag>)
@@ -71,20 +71,20 @@ cd asic/ip/bondpad_70x70 && K=/opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout
   KLAYOUT_PATH=$K KLAYOUT_HOME=$K klayout -n sg13cmos5l -zz -r gen_bondpad.py -rd pdk_root=/opt/IHP-Open-PDK
 ```
 
-**Memories.** `asic/rtl/` holds ASIC-only architectures of the memory entities (**same entity names and ports** as the root files: swap file lists, never compile both into one library). They map onto IHP SRAM black boxes: `sg13_sram_macro` (name switch, BIST off, `A_DLY`=1; extended identifiers keep macro/pin case through GHDL) → `sram_array` (bank × column grid of one macro type) → `sram_w40` (40-bit = 2048x32 + 4096x8). Counters use 4096x16, MajorityRAM one 256x48: 20 macros at D=10000. `asic/sim/sram_models.vhdl` are hand-written sim models of the macros, never in `VHDL_FILES`.
+**Memories.** `asic/rtl/` holds ASIC-only architectures of the memory entities (**same entity names and ports** as the root files: swap file lists, never compile both into one library). They map onto IHP SRAM black boxes: `sg13_sram_macro` (name switch, BIST off, `A_DLY`=1; extended identifiers keep macro/pin case through GHDL) → `sram_array` (bank × column grid of one macro type) → `sram_w40`, which picks macros by depth: ≤256 one 256x48, ≤1024 1024x32 + 1024x8, else 2048x32 + 4096x8. Counters use 1024x16 (≤1024) or 4096x16. D=1000: 6 macros (IM, CM: 1024x32+1024x8; AM: 256x48; counters: 1024x16). D=10000: 20 macros. A new macro type needs a component + generate in `sg13_sram_macro`, a model in `sim/sram_models.vhdl`, and an entry in `cdl/merge_sram_cdl.py`. `asic/sim/sram_models.vhdl` are hand-written sim models of the macros, never in `VHDL_FILES`.
 
-**Floorplan** (`config.yaml`): die 4440×2350, core [365, 365, 4075, 1985]. Two manually placed SRAM rows (`MACROS.*.instances`), pins facing a ~280 µm logic channel. Instance names come from GHDL generate labels (`g_banks:1` is 1-based) under `i_core.`. Changing memory generics/D changes names and bank counts, so re-derive them from the synthesized netlist.
+**Floorplan** (`config.yaml`): die 2400×2000, core [365, 365, 2035, 1635] (D=10000: 4440×2350). Two manually placed SRAM rows, pins facing a ~280 µm logic channel: bottom row (S) IM/CM at y=405, top row (N) counters at y=1021.5 and AM at 1031.5 (at 1021.5 its top edge straddled a horizontal TopMetal1 stripe and pdngen dropped VSS vias, PDN-0110). Instance names come from GHDL generate labels (`g_banks:1` is 1-based, plus `g_1024`/`g_256` from the depth selection) under `i_core.`. `MACROS` and `INSERT_ECO_DIODES` are generated together by `asic/scripts/gen_macros_eco.py` from a synthesized netlist (`--to Yosys.VHDLSynthesis`); placement lives in its `PLACEMENT` dict.
 
-**Pads.** 23 pads: clk/rstn/rxd (`IOPadIn`), txd/led (`IOPadOut30mA`), 4× VDD, 4× VSS, IOVDD, IOVSS, and 8 spare `IOPadIn` (`spare*_pad`, outputs open). Things that are easy to break:
+**Pads.** 22 pads: clk/rstn/sclk/mosi/cs_n (`IOPadIn`), miso/led (`IOPadOut30mA`), 4× VDD, 4× VSS, IOVDD, IOVSS, and 5 spare `IOPadIn` (`spare*_pad`, outputs open). D=10000 had rxd/txd and 8 spares. Things that are easy to break:
 - All pad instance names end in `_pad`; `PAD_*` lists and `PDN_MACRO_CONNECTIONS` rely on it. VHDL is case-insensitive, so top ports are `pad_*` (not `*_PAD`).
 - `rtl/pad_keep.v` (via `EXTRA_VERILOG_MODELS`) redefines the power pads and `IOPadIn` as `(* keep *)` black boxes. GHDL drops VHDL `keep` attributes, and Yosys would otherwise delete port-less or unused-output pads.
 - No `Odb.SetPowerConnections` in the VHDL flow, so pad power pins are tied to VDD/VSS/IOVDD/IOVSS through `PDN_MACRO_CONNECTIONS` (pin patterns anchored, `^vdd$`, so `vdd` doesn't match `iovdd`). IO fillers/corners get their nets by abutment.
-- The spare `IOPadIn` cells exist for the KLayout antenna check: each `IOPadIn` has a vdd-tied gate, and the IO ring's vdd rails (continuous around the die) give that net ratio ≈ rail area / total such gate area. With this die it needs ≥ 10 `IOPadIn` to stay below `Ant.e` 20000. Shrinking the die or removing spare inputs brings the errors back.
-- The clock must match the UART divider: `G_CLK_FREQ_HZ` default in `hdc_chip_top` is 50 MHz = `CLOCK_PERIOD: 20`.
+- The spare `IOPadIn` cells exist for the KLayout antenna check: each `IOPadIn` has a vdd-tied gate, and the IO ring's vdd rails (continuous around the die) give that net ratio ≈ rail area / total such gate area. The 4440×2350 die needed ≥ 10 `IOPadIn` to stay below `Ant.e` 20000; the 2400×2000 die should need ~7 (scaled by perimeter, unverified), and has 10. Shrinking the die or removing spare inputs brings the errors back.
+- Clocks (`chip_top.sdc`): `clk` = `CLOCK_PERIOD` 20 ns (50 MHz; no UART divider any more, `G_CLK_FREQ_HZ` is informational). The SPI front end clocks flops on both `sclk` edges and on falling `cs_n` (also its async reset), so `sclk` and `cs_n` are SDC clocks too (100 ns, same group), asynchronous to `clk` (toggle synchronizers). All clocks are defined on the `IOPadIn` `p2c` pins; CTS builds trees for every SDC clock. `mosi`/`miso` are timed against `sclk`.
 
 **Bondpad** (`asic/ip/bondpad_70x70/`) is generated by the PDK's `bondpad.py` through `gen_bondpad.py`, which works around three bugs in it: string `diameter` crashes the LEF writer; the GDS is centred on (0,0) while the LEF starts at (0,0); LEF `CLASS COVER BUMP` is rejected by OpenROAD's `place_bondpad` (needs `COVER`). Name `bondpad_70x70` and offsets come from the PDK IO config.
 
-**PDN.** `asic/pdn_cfg.tcl` is the template's `pdn_cfg.tcl` unchanged except the SRAM section (one macro grid selecting all SRAM cells by master, Metal4↔TopMetal1). pdngen's `-connect_to_pads` only creates core-ring↔IO-ring straps on the **west/east** sides, mostly into IO filler cells (pads collide with the TopMetal1 core stripes). North/south get none; the IHP template render shows the same, so it is treated as a PDK limitation. Core power pairs 2/3 therefore sit on west/east. A VDD pad never gets its own strap (its TopMetal1 `vdd` shape makes pdngen reject it); it feeds the core via the IO ring rail. When verifying this, count straps into *all* IO-ring cells per side; LibreLane's grid-error reports / PSM-0040 don't detect missing pad connections.
+**PDN.** `asic/pdn_cfg.tcl` is the template's `pdn_cfg.tcl` unchanged except the SRAM section (one macro grid over every loaded `RM_IHPSG13_1P_*` master, Metal4↔TopMetal1). pdngen's `-connect_to_pads` only creates core-ring↔IO-ring straps on the **west/east** sides, mostly into IO filler cells (pads collide with the TopMetal1 core stripes). North/south get none; the IHP template render shows the same, so it is treated as a PDK limitation. Core power pairs 2/3 therefore sit on west/east. A VDD pad never gets its own strap (its TopMetal1 `vdd` shape makes pdngen reject it); it feeds the core via the IO ring rail. When verifying this, count straps into *all* IO-ring cells per side; LibreLane's grid-error reports / PSM-0040 don't detect missing pad connections.
 
 **Disabled steps:** Magic DRC, Magic stream-out + KLayout XOR, Magic SPICE extraction, IllegalOverlap and Netgen LVS: slow and inaccurate for cmos5l. KLayout DRC, antenna, density, seal ring and fill run as in the `Chip` flow.
 
@@ -99,7 +99,7 @@ cd asic/ip/bondpad_70x70 && K=/opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout
 **Antenna.**
 - Signoff uses `asic/drc/antenna_cmos5l_pr990.drc`: the PDK deck with IHP-Open-PDK PR #990 ported to the 5-metal stack (`has_diode` evaluated per layer with staged connectivity). The stock deck misses violations where diffusion only joins a net at Metal4. The deck needs its rule JSONs via `KLAYOUT_ANTENNA_OPTIONS`; these are absolute `/opt/IHP-Open-PDK` paths because `pdk_dir::` expands to a list there.
 - OpenROAD's antenna checker counts only routed wire area: it ignores the pins' own metal and never reads `ANTENNAPARTIALMETALAREA` (checked in source and by test). KLayout counts both, so OpenROAD-clean nets end slightly over 200 in KLayout. The stdcell LEF is consistent (pin shapes cover all input Metal1 except `RESET_B`, which has the partial attribute). The gap is at most ~4 of ratio (`sdfbbp_1/SET_B`), so `TECH_LEFS` points to `asic/lef/sg13cmos5l_tech_ant195.lef`: the PDK tech LEF with metal `ANTENNACUMAREARATIO` (and the PWL start points) lowered from 200 to 195. SRAM pins carry much larger partial areas (up to ~69 of ratio on `A_ADDR`), so the margin does not cover them; they rely on ECO diodes instead. LibreLane's post-DRT loop only starts when `check_antennas` finds a hard violation, so `-ratio_margin` alone doesn't help near-limit nets.
-- `INSERT_ECO_DIODES` puts an `sg13cmos5l_antennanp` on every functional SRAM input (clock, address, data, enables; 747 entries). Each one sits at the pin's x, 12 µm outside the pin edge: pin top + 12 µm for the bottom row (R180), pin bottom − 12 µm for R0 macros. The main list came from a one-off script that is not in the repo; the 20 `A_CLK` entries were added later with the same rule, from the pin boxes in the routed odb. **If macro placement, orientation or memory generics change, the list must be regenerated.**
+- `INSERT_ECO_DIODES` puts an `sg13cmos5l_antennanp` on every functional SRAM input (clock, address, data, enables; tie-driven bits skipped, so no `A_MEN` with single-bank memories): 207 entries at D=1000, 747 at D=10000. Each one sits at the pin's x, 12 µm outside the pin edge: pin top + 12 µm for the bottom row (S/R180), pin bottom − 12 µm for N macros. `asic/scripts/gen_macros_eco.py` generates it (checked against the D=10000 list, which came from routed-odb pin boxes). **If macro placement, orientation or memory generics change, regenerate it.**
 - GRT/DRT antenna repair use margin 30 % and 5 iterations. The post-DRT repair loop in `drt.tcl` takes its margin from `GRT_ANTENNA_REPAIR_MARGIN`; `DRT_ANTENNA_REPAIR_MARGIN` is unused.
 - `Odb.InsertECODiodes` runs right after `OpenROAD.CheckAntennas` (post-GRT), i.e. *before* `RepairDesignPostGRT`; inserted later, the diode load was invisible to repair.
 
@@ -107,18 +107,22 @@ cd asic/ip/bondpad_70x70 && K=/opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout
 
 **Functional caveat:** SRAM contents are undefined at power-up, including the class counters, which the design only clears *after* a finalize. On the ASIC the host must issue one dummy finalize (`M 1`, `X`) after reset before training.
 
-## UART protocol (`hdc_uart_loader.vhdl`)
+## Command protocol (`hdc_cmd_loader.vhdl`, over SPI)
 
-8N1, all multi-byte fields little-endian. Most commands reply `'K'` (0x4B); unknown command replies `'E'` (0x45). On every rising edge of `done` the loader sends one byte `0x00..0x07` = `recognized_class` (sent only when the FSM is back in `WAIT_CMD`). Host must therefore distinguish ack bytes from result bytes.
+Transport (`hdc_spi_loader`/`spi_slave`, SPI mode 0, MSB first): the master clocks byte pairs. A pair `0xA5, b` delivers command byte `b`; any other first byte is a poll. Each pair also returns one pair: `0x01, data` if a reply byte was pending, else `0x00, x`. The reply to a pair is shifted out during the next pair (preloaded at the 16th bit, the first pair of a session at the falling edge of `cs_n`).
+
+All multi-byte fields little-endian. Most commands reply `'K'` (0x4B); unknown command replies `'E'` (0x45). On every rising edge of `done` the loader sends one byte: `0x5A` after a finalize, else `0x00..0x07` = `recognized_class` (sent only when the FSM is back in `WAIT_CMD`). Host must therefore distinguish ack bytes from result bytes.
 
 | Cmd | Payload | Effect |
 |---|---|---|
 | `I` / `C` / `A` | addr(2) + data(5) | Write 40-bit word to IM / CM / AM |
+| `W` | sel(`I`/`C`/else→AM) + addr(2) + count(2) + count×data(5) | Block write, auto-incrementing address; one `K` at the end |
 | `R` | sel(`I`/`C`/else→AM) + addr(2) | Returns 5 data bytes (no `K`) |
 | `F` | value(4) | Push one feature; after the 32nd, auto-pulses `start` |
+| `B` | 32 × value(4) | Push all 32 features, then `start`; one `K` |
 | `M` | byte (bit 0) | `train_mode` |
 | `L` | byte (bits 2..0) | `label` |
 | `X` | — | `finalize` + `start` (requires `train_mode=1`) |
 | `S` | — | Force `start` |
 
-The loader's feature counter is hardcoded to 32, so N must stay 32 when using the UART top.
+The loader's feature counter is hardcoded to 32, so N must stay 32 when using the SPI top.

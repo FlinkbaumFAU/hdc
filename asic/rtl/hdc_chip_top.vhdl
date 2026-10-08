@@ -8,18 +8,20 @@ use IEEE.STD_LOGIC_1164.ALL;
 -- Instance names of all pads end in "_pad" (relied on by config.yaml).
 entity hdc_chip_top is
     generic (
-        G_CLK_FREQ_HZ : integer := 50_000_000;
-        G_BAUD        : integer := 115200
+        G_CLK_FREQ_HZ : integer := 50_000_000  -- informational; CLOCK_PERIOD in config.yaml
     );
     port (
         pad_clk  : inout std_logic;
         pad_rstn : inout std_logic;
-        pad_rxd  : inout std_logic;
-        pad_txd  : inout std_logic;
         pad_led  : inout std_logic;
+        -- SPI slave (sclk/cs_n also clock flops in the SPI front end)
+        pad_sclk : inout std_logic;
+        pad_mosi : inout std_logic;
+        pad_cs_n : inout std_logic;
+        pad_miso : inout std_logic;
         -- Unused inputs: their IOPadIn cells only add gate area on the IO
         -- ring's vdd net (KLayout Ant.e on the ring rails; see config.yaml)
-        pad_spare : inout std_logic_vector(7 downto 0)
+        pad_spare : inout std_logic_vector(4 downto 0)
     );
 end hdc_chip_top;
 
@@ -44,7 +46,7 @@ architecture rtl of hdc_chip_top is
     component \sg13cmos5l_IOPadIOVdd\ is end component;
     component \sg13cmos5l_IOPadIOVss\ is end component;
 
-    signal clk, rstn, rxd, txd, led : std_logic;
+    signal clk, rstn, led, sclk, mosi, cs_n, miso : std_logic;
 
 begin
 
@@ -64,8 +66,10 @@ begin
 
     clk_pad:  \sg13cmos5l_IOPadIn\     port map (\pad\ => pad_clk,  \p2c\ => clk);
     rstn_pad: \sg13cmos5l_IOPadIn\     port map (\pad\ => pad_rstn, \p2c\ => rstn);
-    rxd_pad:  \sg13cmos5l_IOPadIn\     port map (\pad\ => pad_rxd,  \p2c\ => rxd);
-    txd_pad:  \sg13cmos5l_IOPadOut30mA\ port map (\pad\ => pad_txd,  \c2p\ => txd);
+    sclk_pad: \sg13cmos5l_IOPadIn\     port map (\pad\ => pad_sclk, \p2c\ => sclk);
+    mosi_pad: \sg13cmos5l_IOPadIn\     port map (\pad\ => pad_mosi, \p2c\ => mosi);
+    cs_n_pad: \sg13cmos5l_IOPadIn\     port map (\pad\ => pad_cs_n, \p2c\ => cs_n);
+    miso_pad: \sg13cmos5l_IOPadOut30mA\ port map (\pad\ => pad_miso, \c2p\ => miso);
     led_pad:  \sg13cmos5l_IOPadOut30mA\ port map (\pad\ => pad_led,  \c2p\ => led);
 
     -- Spare inputs (p2c left open; kept by pad_keep.v)
@@ -74,21 +78,21 @@ begin
     spare2_pad: \sg13cmos5l_IOPadIn\ port map (\pad\ => pad_spare(2), \p2c\ => open);
     spare3_pad: \sg13cmos5l_IOPadIn\ port map (\pad\ => pad_spare(3), \p2c\ => open);
     spare4_pad: \sg13cmos5l_IOPadIn\ port map (\pad\ => pad_spare(4), \p2c\ => open);
-    spare5_pad: \sg13cmos5l_IOPadIn\ port map (\pad\ => pad_spare(5), \p2c\ => open);
-    spare6_pad: \sg13cmos5l_IOPadIn\ port map (\pad\ => pad_spare(6), \p2c\ => open);
-    spare7_pad: \sg13cmos5l_IOPadIn\ port map (\pad\ => pad_spare(7), \p2c\ => open);
 
     i_core: entity work.hdc_word40_top
         generic map (
+            G_D           => 1000,
             G_CLK_FREQ_HZ => G_CLK_FREQ_HZ,
-            G_BAUD        => G_BAUD
+            G_USE_PLL     => false  -- GateMate CC_PLL, FPGA only
         )
         port map (
             clk_i  => clk,
             rstn_i => rstn,
             led_o  => led,
-            txd_o  => txd,
-            rxd_i  => rxd
+            sclk_i => sclk,
+            mosi_i => mosi,
+            miso_o => miso,
+            cs_n_i => cs_n
         );
 
 end rtl;

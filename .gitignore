@@ -15,3 +15,4 @@ asic/drc/filler/test/
 # OS / editor / agent state
 .DS_Store
 .claude/*.lock
+__pycache__/

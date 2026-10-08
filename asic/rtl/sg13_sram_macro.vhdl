@@ -74,6 +74,42 @@ architecture rtl of sg13_sram_macro is
         );
     end component;
 
+    component \RM_IHPSG13_1P_1024x32_c2_bm_bist\ is
+        port (
+            \A_CLK\, \A_MEN\, \A_WEN\, \A_REN\, \A_DLY\ : in std_logic;
+            \A_ADDR\        : in  std_logic_vector(9 downto 0);
+            \A_DIN\, \A_BM\ : in  std_logic_vector(31 downto 0);
+            \A_DOUT\        : out std_logic_vector(31 downto 0);
+            \A_BIST_CLK\, \A_BIST_EN\, \A_BIST_MEN\, \A_BIST_WEN\, \A_BIST_REN\ : in std_logic;
+            \A_BIST_ADDR\   : in  std_logic_vector(9 downto 0);
+            \A_BIST_DIN\, \A_BIST_BM\ : in std_logic_vector(31 downto 0)
+        );
+    end component;
+
+    component \RM_IHPSG13_1P_1024x8_c2_bm_bist\ is
+        port (
+            \A_CLK\, \A_MEN\, \A_WEN\, \A_REN\, \A_DLY\ : in std_logic;
+            \A_ADDR\        : in  std_logic_vector(9 downto 0);
+            \A_DIN\, \A_BM\ : in  std_logic_vector(7 downto 0);
+            \A_DOUT\        : out std_logic_vector(7 downto 0);
+            \A_BIST_CLK\, \A_BIST_EN\, \A_BIST_MEN\, \A_BIST_WEN\, \A_BIST_REN\ : in std_logic;
+            \A_BIST_ADDR\   : in  std_logic_vector(9 downto 0);
+            \A_BIST_DIN\, \A_BIST_BM\ : in std_logic_vector(7 downto 0)
+        );
+    end component;
+
+    component \RM_IHPSG13_1P_1024x16_c2_bm_bist\ is
+        port (
+            \A_CLK\, \A_MEN\, \A_WEN\, \A_REN\, \A_DLY\ : in std_logic;
+            \A_ADDR\        : in  std_logic_vector(9 downto 0);
+            \A_DIN\, \A_BM\ : in  std_logic_vector(15 downto 0);
+            \A_DOUT\        : out std_logic_vector(15 downto 0);
+            \A_BIST_CLK\, \A_BIST_EN\, \A_BIST_MEN\, \A_BIST_WEN\, \A_BIST_REN\ : in std_logic;
+            \A_BIST_ADDR\   : in  std_logic_vector(9 downto 0);
+            \A_BIST_DIN\, \A_BIST_BM\ : in std_logic_vector(15 downto 0)
+        );
+    end component;
+
     constant ONES   : std_logic_vector(DBITS-1 downto 0) := (others => '1');
     constant ZEROS  : std_logic_vector(DBITS-1 downto 0) := (others => '0');
     constant AZEROS : std_logic_vector(ABITS-1 downto 0) := (others => '0');
@@ -119,6 +155,42 @@ begin
     g_256x48: if MACRO = "256x48" generate
         assert ABITS = 8 and DBITS = 48 severity failure;
         u_mem: \RM_IHPSG13_1P_256x48_c2_bm_bist\
+            port map (
+                \A_CLK\ => clk, \A_MEN\ => men, \A_WEN\ => wen, \A_REN\ => ren, \A_DLY\ => '1',
+                \A_ADDR\ => addr, \A_DIN\ => din, \A_BM\ => ONES, \A_DOUT\ => dout,
+                \A_BIST_CLK\ => '0', \A_BIST_EN\ => '0', \A_BIST_MEN\ => '0',
+                \A_BIST_WEN\ => '0', \A_BIST_REN\ => '0',
+                \A_BIST_ADDR\ => AZEROS, \A_BIST_DIN\ => ZEROS, \A_BIST_BM\ => ZEROS
+            );
+    end generate;
+
+    g_1024x32: if MACRO = "1024x32" generate
+        assert ABITS = 10 and DBITS = 32 severity failure;
+        u_mem: \RM_IHPSG13_1P_1024x32_c2_bm_bist\
+            port map (
+                \A_CLK\ => clk, \A_MEN\ => men, \A_WEN\ => wen, \A_REN\ => ren, \A_DLY\ => '1',
+                \A_ADDR\ => addr, \A_DIN\ => din, \A_BM\ => ONES, \A_DOUT\ => dout,
+                \A_BIST_CLK\ => '0', \A_BIST_EN\ => '0', \A_BIST_MEN\ => '0',
+                \A_BIST_WEN\ => '0', \A_BIST_REN\ => '0',
+                \A_BIST_ADDR\ => AZEROS, \A_BIST_DIN\ => ZEROS, \A_BIST_BM\ => ZEROS
+            );
+    end generate;
+
+    g_1024x8: if MACRO = "1024x8" generate
+        assert ABITS = 10 and DBITS = 8 severity failure;
+        u_mem: \RM_IHPSG13_1P_1024x8_c2_bm_bist\
+            port map (
+                \A_CLK\ => clk, \A_MEN\ => men, \A_WEN\ => wen, \A_REN\ => ren, \A_DLY\ => '1',
+                \A_ADDR\ => addr, \A_DIN\ => din, \A_BM\ => ONES, \A_DOUT\ => dout,
+                \A_BIST_CLK\ => '0', \A_BIST_EN\ => '0', \A_BIST_MEN\ => '0',
+                \A_BIST_WEN\ => '0', \A_BIST_REN\ => '0',
+                \A_BIST_ADDR\ => AZEROS, \A_BIST_DIN\ => ZEROS, \A_BIST_BM\ => ZEROS
+            );
+    end generate;
+
+    g_1024x16: if MACRO = "1024x16" generate
+        assert ABITS = 10 and DBITS = 16 severity failure;
+        u_mem: \RM_IHPSG13_1P_1024x16_c2_bm_bist\
             port map (
                 \A_CLK\ => clk, \A_MEN\ => men, \A_WEN\ => wen, \A_REN\ => ren, \A_DLY\ => '1',
                 \A_ADDR\ => addr, \A_DIN\ => din, \A_BM\ => ONES, \A_DOUT\ => dout,

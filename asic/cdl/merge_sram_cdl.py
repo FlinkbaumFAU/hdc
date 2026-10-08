@@ -9,7 +9,8 @@ Usage: python3 merge_sram_cdl.py   (re-run when the macro list changes)
 import re
 
 PDK = '/opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.ref/sg13cmos5l_sram/cdl/'
-MACROS = ['2048x32_c2', '4096x8_c3', '4096x16_c3', '256x48_c2']
+MACROS = ['1024x32_c2', '1024x8_c2', '1024x16_c2', '256x48_c2',     # config.yaml
+          '2048x32_c2', '4096x8_c3', '4096x16_c3']                 # config_d10000.yaml
 
 subckts = {}
 for m in MACROS:

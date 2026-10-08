@@ -1,0 +1,684 @@
+# Full chip (pad ring + bondpads) of hdc_word40_top for IHP SG13CMOS5L:
+# D=1000, SPI interface. The D=10000 / UART version is config_d10000.yaml.
+# Based on https://github.com/IHP-GmbH/ihp-sg13-librelane-template (librelane/, 40ca8b9).
+meta:
+  version: 3
+  flow: Chip
+  substituting_steps:
+    # VHDL instead of Verilog (same substitutions as the VHDLClassic flow)
+    Verilator.Lint: null
+    Checker.LintTimingConstructs: null
+    Checker.LintErrors: null
+    Checker.LintWarnings: null
+    Yosys.JsonHeader: null
+    Yosys.Synthesis: Yosys.VHDLSynthesis
+    Odb.SetPowerConnections: null   # needs the JSON header; see PDN_MACRO_CONNECTIONS
+    Odb.WriteVerilogHeader: null
+    Yosys.EQY: null
+
+    # Magic DRC and Netgen LVS disabled (slow and inaccurate); LVS runs in
+    # KLayout instead, against a CDL written by OpenROAD from the final odb.
+    Magic.DRC: null
+    Checker.MagicDRC: null
+    Magic.SpiceExtraction: null
+    Checker.IllegalOverlap: null
+    +OpenROAD.IRDropReport: OpenROAD.WriteCDL
+    Netgen.LVS: KLayout.LVS
+
+    # GDS comes from KLayout; Magic's stream-out (only used for the XOR
+    # check) has an offset on the SRAMs.
+    Magic.StreamOut: null
+    KLayout.XOR: null
+    Checker.XOR: null
+
+    # ECO antenna diodes on the SRAM inputs (INSERT_ECO_DIODES), right after
+    # global routing and *before* post-GRT design repair, so repair sees the
+    # diode load (inserted later, they caused most post-route slew violations
+    # on the shared SRAM address/data nets). Legalized and incrementally
+    # re-routed by the step.
+    +OpenROAD.CheckAntennas: Odb.InsertECODiodes
+
+DESIGN_NAME: hdc_chip_top
+
+# asic/rtl replaces the FPGA memory files from the repo root.
+VHDL_FILES:
+  - dir::rtl/sg13_sram_macro.vhdl
+  - dir::rtl/sram_array.vhdl
+  - dir::rtl/sram_w40.vhdl
+  - dir::rtl/IdentityMemory.vhdl
+  - dir::rtl/ContinuousMemory.vhdl
+  - dir::rtl/AssociativeMemory.vhdl
+  - dir::rtl/ClassCounterRAM.vhdl
+  - dir::../Accelerator.vhdl
+  - dir::../spi_slave.vhdl
+  - dir::../hdc_spi_loader.vhdl
+  - dir::../hdc_cmd_loader.vhdl
+  - dir::../hdc_word40_top.vhdl
+  - dir::rtl/hdc_chip_top.vhdl
+GHDL_ARGUMENTS: ["--std=08"]
+
+# Keeps the port-less power pads through synthesis
+EXTRA_VERILOG_MODELS:
+  - dir::rtl/pad_keep.v
+
+PRIMARY_GDSII_STREAMOUT_TOOL: klayout
+KLAYOUT_CONFLICT_RESOLUTION: SkipNewCell
+
+# Pad ring. Signal pads sit on the west/east sides, level with the logic
+# channel between the two SRAM rows. pdngen only connects the core ring to
+# the pad ring on west/east, so core supply pairs 2/3 are placed there.
+# spare*_pad: unused IOPadIn cells. Each adds a vdd-tied gate to the IO ring's
+# vdd rail net, which keeps that net's antenna ratio (rail area / gate area,
+# Ant.e_Metal3/4/TopMetal1) below 20000. The 4440x2350 D=10000 die needed
+# >= 10 IOPadIn; the ratio scales with the ring perimeter, so this 2400x2000
+# die should need ~7. 5 functional + 5 spare = 10 keeps the old margin
+# (estimate, not yet checked by a run).
+PAD_SOUTH: [vdd0_pad, vss0_pad, iovdd_pad]
+PAD_EAST: [miso_pad, spare3_pad, vdd3_pad, mosi_pad, vss3_pad, spare4_pad, led_pad]
+PAD_NORTH: [iovss_pad, vdd1_pad, vss1_pad]
+PAD_WEST: [rstn_pad, spare0_pad, vdd2_pad, clk_pad, spare1_pad, vss2_pad, sclk_pad, spare2_pad, cs_n_pad]
+
+# Bondpad generated with the PDK's bondpad.py (ip/bondpad_70x70/gen_bondpad.py);
+# PAD_BONDPAD_NAME/OFFSETS come from the PDK IO config (bondpad_70x70).
+EXTRA_GDS:
+  - dir::ip/bondpad_70x70/gds/bondpad_70x70.gds
+EXTRA_LEFS:
+  - dir::ip/bondpad_70x70/lef/bondpad_70x70.lef
+IGNORE_DISCONNECTED_MODULES:
+  - bondpad_70x70
+
+# KLayout LVS. The schematic CDL needs every master: the SRAM macros (merged
+# into one file, see cdl/merge_sram_cdl.py) and the device-less bondpad. The
+# IO CDL is a copy without the broken (and unused) IOPadInOut30mA.
+# lvs/sg13cmos5l_chip.lvs is the PDK deck with IO cells and SRAM macros
+# compared as black boxes (their own PDK netlists don't match; lvs/hard_ip.rb).
+PAD_CDLS:
+  - dir::cdl/sg13cmos5l_io.cdl
+EXTRA_CDLS:
+  - dir::cdl/sram.cdl
+  - dir::ip/bondpad_70x70/cdl/bondpad_70x70.cdl
+KLAYOUT_LVS_SCRIPT: dir::lvs/sg13cmos5l_chip.lvs
+KLAYOUT_LVS_OPTIONS:
+  run_mode: deep
+
+# SDC
+PNR_SDC_FILE: dir::chip_top.sdc
+SIGNOFF_SDC_FILE: dir::chip_top.sdc
+FALLBACK_SDC: dir::chip_top.sdc
+
+# Power / ground nets
+VDD_NETS:
+  - VDD
+GND_NETS:
+  - VSS
+
+# Core clock, 50 MHz (no UART divider any more, so G_CLK_FREQ_HZ is only
+# informational). The SPI clocks sclk/cs_n (10 MHz) are defined in
+# chip_top.sdc only; CTS builds trees for all SDC clocks.
+CLOCK_PORT: pad_clk
+CLOCK_NET: clk_pad/p2c
+CLOCK_PERIOD: 20
+
+# Floorplanning: two SRAM rows with pins facing a ~280um logic channel
+# (6 macros, ~0.53 mm2; logic ~0.4 mm2 estimated from the D=10000 run).
+FP_SIZING: absolute
+DIE_AREA: [0, 0, 2400, 2000]
+CORE_AREA: [365, 365, 2035, 1635]
+FP_MACRO_HORIZONTAL_HALO: 10
+FP_MACRO_VERTICAL_HALO: 10
+
+PL_TARGET_DENSITY_PCT: 40
+GRT_ALLOW_CONGESTION: true
+
+# Power Distribution Network (template settings)
+PDN_CFG: dir::pdn_cfg.tcl
+PDN_CORE_RING: True
+
+# Match/overlap the SRAM PDN
+PDN_HWIDTH: 6
+PDN_HSPACING: 2.0
+PDN_HOFFSET: 14
+
+# Maximum metal width without slotting: 30um
+PDN_CORE_RING_VWIDTH: 15
+PDN_CORE_RING_HWIDTH: 15
+# Ensure minimum spacing for long metals
+PDN_CORE_RING_VSPACING: 5
+PDN_CORE_RING_HSPACING: 5
+
+PDN_CORE_RING_CONNECT_TO_PADS: True
+PDN_ENABLE_PINS: False
+
+# Global power connections. Without the JSON header (VHDL flow) nothing
+# ties the pad power pins to nets, so do it here for the RTL pads (*_pad),
+# like SetPowerConnections does in the template. IO fillers/corners stay
+# unconnected (rails connect by abutment). Pin patterns are anchored so
+# that "vdd" does not also match "iovdd".
+PDN_MACRO_CONNECTIONS:
+  - "i_core.*u_macro.* VDD VSS VDD! VSS!"
+  - "i_core.*u_macro.* VDD VSS VDDARRAY! VSS!"
+  - ".*_pad VDD VSS ^vdd$ ^vss$"
+  - ".*_pad IOVDD IOVSS ^iovdd$ ^iovss$"
+
+# Design repair (slew/cap). Post-GPL repair only sees placement-estimated RC,
+# and the post-route violations were mostly SRAM A_DOUT max-cap (lib limit
+# 0.064 pF), SRAM input slew and clock-tree buffers. So: more headroom after
+# placement, plus design and timing repair on global-routing parasitics
+# (both off by default in the Classic/Chip flow).
+DESIGN_REPAIR_MAX_SLEW_PCT: 30
+DESIGN_REPAIR_MAX_CAP_PCT: 30
+RUN_POST_GRT_DESIGN_REPAIR: true
+GRT_DESIGN_REPAIR_MAX_SLEW_PCT: 20
+GRT_DESIGN_REPAIR_MAX_CAP_PCT: 20
+RUN_POST_GRT_RESIZER_TIMING: true
+# Hold margin against post-route clock skew: global routing sometimes sends a
+# clock net around the bottom SRAM row (chip6: +1.5 mm, +0.33 ns skew, fast
+# hold -0.2 ns), which pre-route hold repair can't see. Defaults 0.1 / 0.05.
+PL_RESIZER_HOLD_SLACK_MARGIN: 0.3
+GRT_RESIZER_HOLD_SLACK_MARGIN: 0.3
+
+# Keep clock buffers off the SRAMs. (Clock leaf buffers drive ~20 flops each,
+# which shows up as max-fanout, not slew, violations in the STA report.)
+CTS_OBSTRUCTION_AWARE: true
+
+# Metal/Activ fill: the PDK filler.py runs flat and ran out of memory (~30 GB,
+# killed) on this chip. drc/filler/ runs the PDK fill macros in deep mode:
+# ~1.7 GB, ~4.5 h. Fill cells land in the top cell only.
+KLAYOUT_FILLER_SCRIPT: dir::drc/filler/filler_deep.py
+
+# Antenna repair
+DIODE_CELL: sg13cmos5l_antennanp/A
+GRT_ANTENNA_REPAIR_ITERS: 5
+GRT_ANTENNA_REPAIR_MARGIN: 30
+DRT_ANTENNA_REPAIR_ITERS: 5
+DRT_ANTENNA_REPAIR_MARGIN: 30
+
+# KLayout antenna signoff with IHP-Open-PDK PR #990 (per-layer has_diode)
+# ported to cmos5l; the deck needs its rule JSONs passed explicitly. Absolute
+# paths: pdk_dir:: expands to a list, which this str-only option rejects.
+KLAYOUT_ANTENNA_RUNSET: dir::drc/antenna_cmos5l_pr990.drc
+KLAYOUT_ANTENNA_OPTIONS:
+  drc_json_default: /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/drc/rule_decks/sg13cmos5l_tech_default.json
+  drc_json: /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/python/sg13cmos5l_pycell_lib/sg13cmos5l_tech_mod.json
+
+# Tech LEF with the metal cumulative antenna ratio lowered 200 -> 195, so
+# OpenROAD's checks/repairs keep a margin for the cell pins' own Metal1,
+# which OpenROAD doesn't count but KLayout does (worst pin adds ~4).
+TECH_LEFS:
+  "nom_*": dir::lef/sg13cmos5l_tech_ant195.lef
+  "min_*": dir::lef/sg13cmos5l_tech_ant195.lef
+  "max_*": dir::lef/sg13cmos5l_tech_ant195.lef
+
+# ECO diodes on every functional SRAM input (clock, address, data, enables;
+# tie-driven bits skipped): long nets from the logic channel into the macros
+# only see diffusion at Metal4. Placed 12um outside the pin edge. Generated
+# with the MACROS section by scripts/gen_macros_eco.py from the synthesized
+# netlist; regenerate when placement, orientation or memory generics change.
+INSERT_ECO_DIODES:
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_CLK"
+    placement: [954.33, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_WEN"
+    placement: [957.39, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_REN"
+    placement: [957.9, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[0]"
+    placement: [956.37, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[1]"
+    placement: [955.86, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[2]"
+    placement: [964.02, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[3]"
+    placement: [963.0, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[4]"
+    placement: [966.57, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[5]"
+    placement: [965.55, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[6]"
+    placement: [944.13, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_ADDR[7]"
+    placement: [945.15, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[0]"
+    placement: [665.22, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[1]"
+    placement: [676.46, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[2]"
+    placement: [687.7, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[3]"
+    placement: [698.94, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[4]"
+    placement: [710.18, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[5]"
+    placement: [721.42, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[6]"
+    placement: [732.66, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[7]"
+    placement: [743.9, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[8]"
+    placement: [755.14, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[9]"
+    placement: [766.38, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[10]"
+    placement: [777.62, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[11]"
+    placement: [788.86, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[12]"
+    placement: [800.1, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[13]"
+    placement: [811.34, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[14]"
+    placement: [822.58, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[15]"
+    placement: [833.82, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[16]"
+    placement: [845.06, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[17]"
+    placement: [856.3, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[18]"
+    placement: [867.54, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[19]"
+    placement: [878.78, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[20]"
+    placement: [890.02, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[21]"
+    placement: [901.26, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[22]"
+    placement: [912.5, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[23]"
+    placement: [923.74, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[24]"
+    placement: [996.34, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[25]"
+    placement: [1007.58, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[26]"
+    placement: [1018.82, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[27]"
+    placement: [1030.06, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[28]"
+    placement: [1041.3, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[29]"
+    placement: [1052.54, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[30]"
+    placement: [1063.78, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[31]"
+    placement: [1075.02, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[32]"
+    placement: [1086.26, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[33]"
+    placement: [1097.5, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[34]"
+    placement: [1108.74, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[35]"
+    placement: [1119.98, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[36]"
+    placement: [1131.22, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[37]"
+    placement: [1142.46, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[38]"
+    placement: [1153.7, 1019.5]
+  - target: "i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem/A_DIN[39]"
+    placement: [1164.94, 1019.5]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_CLK"
+    placement: [1524.31, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_WEN"
+    placement: [1521.25, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_REN"
+    placement: [1520.74, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[0]"
+    placement: [1522.27, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[1]"
+    placement: [1522.78, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[2]"
+    placement: [1514.62, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[3]"
+    placement: [1515.64, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[4]"
+    placement: [1512.07, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[5]"
+    placement: [1513.09, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[6]"
+    placement: [1534.51, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[7]"
+    placement: [1533.49, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[8]"
+    placement: [1504.42, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[9]"
+    placement: [1509.52, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[0]"
+    placement: [1588.62, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[1]"
+    placement: [1577.38, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[2]"
+    placement: [1566.14, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[3]"
+    placement: [1554.9, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[4]"
+    placement: [1482.3, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[5]"
+    placement: [1471.06, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[6]"
+    placement: [1459.82, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[7]"
+    placement: [1448.58, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_CLK"
+    placement: [1222.55, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_WEN"
+    placement: [1219.49, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_REN"
+    placement: [1218.98, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[0]"
+    placement: [1220.51, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[1]"
+    placement: [1221.02, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[2]"
+    placement: [1212.86, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[3]"
+    placement: [1213.88, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[4]"
+    placement: [1210.31, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[5]"
+    placement: [1211.33, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[6]"
+    placement: [1232.75, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[7]"
+    placement: [1231.73, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[8]"
+    placement: [1202.66, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[9]"
+    placement: [1207.76, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[0]"
+    placement: [1421.74, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[1]"
+    placement: [1410.5, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[2]"
+    placement: [1399.26, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[3]"
+    placement: [1388.02, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[4]"
+    placement: [1376.78, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[5]"
+    placement: [1365.54, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[6]"
+    placement: [1354.3, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[7]"
+    placement: [1343.06, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[8]"
+    placement: [1331.82, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[9]"
+    placement: [1320.58, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[10]"
+    placement: [1309.34, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[11]"
+    placement: [1298.1, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[12]"
+    placement: [1286.86, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[13]"
+    placement: [1275.62, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[14]"
+    placement: [1264.38, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[15]"
+    placement: [1253.14, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[16]"
+    placement: [1180.54, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[17]"
+    placement: [1169.3, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[18]"
+    placement: [1158.06, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[19]"
+    placement: [1146.82, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[20]"
+    placement: [1135.58, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[21]"
+    placement: [1124.34, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[22]"
+    placement: [1113.1, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[23]"
+    placement: [1101.86, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[24]"
+    placement: [1090.62, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[25]"
+    placement: [1079.38, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[26]"
+    placement: [1068.14, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[27]"
+    placement: [1056.9, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[28]"
+    placement: [1045.66, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[29]"
+    placement: [1034.42, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[30]"
+    placement: [1023.18, 753.46]
+  - target: "i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[31]"
+    placement: [1011.94, 753.46]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_CLK"
+    placement: [517.69, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_WEN"
+    placement: [520.75, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_REN"
+    placement: [521.26, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[0]"
+    placement: [519.73, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[1]"
+    placement: [519.22, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[2]"
+    placement: [527.38, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[3]"
+    placement: [526.36, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[4]"
+    placement: [529.93, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[5]"
+    placement: [528.91, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[6]"
+    placement: [507.49, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[7]"
+    placement: [508.51, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[8]"
+    placement: [537.58, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_ADDR[9]"
+    placement: [532.48, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[0]"
+    placement: [408.42, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[1]"
+    placement: [419.66, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[2]"
+    placement: [430.9, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[3]"
+    placement: [442.14, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[4]"
+    placement: [453.38, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[5]"
+    placement: [464.62, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[6]"
+    placement: [475.86, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[7]"
+    placement: [487.1, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[8]"
+    placement: [559.7, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[9]"
+    placement: [570.94, 1009.5]
+  - target: "i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem/A_DIN[10]"
+    placement: [582.18, 1009.5]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_CLK"
+    placement: [920.79, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_WEN"
+    placement: [917.73, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_REN"
+    placement: [917.22, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[0]"
+    placement: [918.75, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[1]"
+    placement: [919.26, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[2]"
+    placement: [911.1, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[3]"
+    placement: [912.12, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[4]"
+    placement: [908.55, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[5]"
+    placement: [909.57, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[6]"
+    placement: [930.99, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[7]"
+    placement: [929.97, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[8]"
+    placement: [900.9, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_ADDR[9]"
+    placement: [906.0, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[0]"
+    placement: [985.1, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[1]"
+    placement: [973.86, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[2]"
+    placement: [962.62, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[3]"
+    placement: [951.38, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[4]"
+    placement: [878.78, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[5]"
+    placement: [867.54, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[6]"
+    placement: [856.3, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem/A_DIN[7]"
+    placement: [845.06, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_CLK"
+    placement: [619.03, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_WEN"
+    placement: [615.97, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_REN"
+    placement: [615.46, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[0]"
+    placement: [616.99, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[1]"
+    placement: [617.5, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[2]"
+    placement: [609.34, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[3]"
+    placement: [610.36, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[4]"
+    placement: [606.79, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[5]"
+    placement: [607.81, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[6]"
+    placement: [629.23, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[7]"
+    placement: [628.21, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[8]"
+    placement: [599.14, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_ADDR[9]"
+    placement: [604.24, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[0]"
+    placement: [818.22, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[1]"
+    placement: [806.98, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[2]"
+    placement: [795.74, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[3]"
+    placement: [784.5, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[4]"
+    placement: [773.26, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[5]"
+    placement: [762.02, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[6]"
+    placement: [750.78, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[7]"
+    placement: [739.54, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[8]"
+    placement: [728.3, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[9]"
+    placement: [717.06, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[10]"
+    placement: [705.82, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[11]"
+    placement: [694.58, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[12]"
+    placement: [683.34, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[13]"
+    placement: [672.1, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[14]"
+    placement: [660.86, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[15]"
+    placement: [649.62, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[16]"
+    placement: [577.02, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[17]"
+    placement: [565.78, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[18]"
+    placement: [554.54, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[19]"
+    placement: [543.3, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[20]"
+    placement: [532.06, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[21]"
+    placement: [520.82, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[22]"
+    placement: [509.58, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[23]"
+    placement: [498.34, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[24]"
+    placement: [487.1, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[25]"
+    placement: [475.86, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[26]"
+    placement: [464.62, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[27]"
+    placement: [453.38, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[28]"
+    placement: [442.14, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[29]"
+    placement: [430.9, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[30]"
+    placement: [419.66, 753.46]
+  - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[31]"
+    placement: [408.42, 753.46]
+
+# SRAM macros and placement: generated by scripts/gen_macros_eco.py (see there).
+MACROS:
+  RM_IHPSG13_1P_256x48_c2_bm_bist:
+    gds: [pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_256x48_c2_bm_bist.gds]
+    lef: [pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_256x48_c2_bm_bist.lef]
+    lib:
+      "*_typ_1p20V_25C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x48_c2_bm_bist_typ_1p20V_25C.lib]
+      "*_fast_1p32V_m40C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x48_c2_bm_bist_fast_1p32V_m55C.lib]
+      "*_slow_1p08V_125C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x48_c2_bm_bist_slow_1p08V_125C.lib]
+    instances:
+      i_core.accel_unit.am.u_mem.g_256.u_mem.g_banks:1.g_cols:1.u_macro.g_256x48.u_mem:
+        location: [661.8, 1031.5]
+        orientation: N
+  RM_IHPSG13_1P_1024x8_c2_bm_bist:
+    gds: [pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_1024x8_c2_bm_bist.gds]
+    lef: [pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_1024x8_c2_bm_bist.lef]
+    lib:
+      "*_typ_1p20V_25C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x8_c2_bm_bist_typ_1p20V_25C.lib]
+      "*_fast_1p32V_m40C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x8_c2_bm_bist_fast_1p32V_m55C.lib]
+      "*_slow_1p08V_125C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x8_c2_bm_bist_slow_1p08V_125C.lib]
+    instances:
+      i_core.accel_unit.cim.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem:
+        location: [1445.16, 405.0]
+        orientation: S
+      i_core.accel_unit.im.u_mem.g_1024.u_hi.g_banks:1.g_cols:1.u_macro.g_1024x8.u_mem:
+        location: [841.64, 405.0]
+        orientation: S
+  RM_IHPSG13_1P_1024x32_c2_bm_bist:
+    gds: [pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_1024x32_c2_bm_bist.gds]
+    lef: [pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_1024x32_c2_bm_bist.lef]
+    lib:
+      "*_typ_1p20V_25C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x32_c2_bm_bist_typ_1p20V_25C.lib]
+      "*_fast_1p32V_m40C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x32_c2_bm_bist_fast_1p32V_m55C.lib]
+      "*_slow_1p08V_125C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x32_c2_bm_bist_slow_1p08V_125C.lib]
+    instances:
+      i_core.accel_unit.cim.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem:
+        location: [1008.52, 405.0]
+        orientation: S
+      i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem:
+        location: [405.0, 405.0]
+        orientation: S
+  RM_IHPSG13_1P_1024x16_c2_bm_bist:
+    gds: [pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_1024x16_c2_bm_bist.gds]
+    lef: [pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_1024x16_c2_bm_bist.lef]
+    lib:
+      "*_typ_1p20V_25C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_typ_1p20V_25C.lib]
+      "*_fast_1p32V_m40C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_fast_1p32V_m55C.lib]
+      "*_slow_1p08V_125C": [pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_slow_1p08V_125C.lib]
+    instances:
+      i_core.accel_unit.gen_training_ram.cc.g_1024.u_mem.g_banks:1.g_cols:1.u_macro.g_1024x16.u_mem:
+        location: [405.0, 1021.5]
+        orientation: N

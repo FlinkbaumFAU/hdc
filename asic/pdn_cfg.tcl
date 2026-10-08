@@ -199,16 +199,21 @@ add_pdn_connect \
 # https://github.com/IHP-GmbH/ihp-sg13-librelane-template (librelane/pdn_cfg.tcl, 40ca8b9):
 # the SRAM power pins (VDD!, VDDARRAY!, VSS! on Metal4) connect directly to
 # the TopMetal1 stripes. Instead of listing instances, the grid selects the
-# SRAM cells by master (all 20 instances, orientations N and S, are
-# connected the same way on this 5-metal stack).
+# SRAM cells by master: every loaded RM_IHPSG13_1P_* macro (all instances,
+# orientations N and S, are connected the same way on this 5-metal stack).
+
+set sram_masters [list]
+foreach lib [[ord::get_db] getLibs] {
+    foreach master [$lib getMasters] {
+        if { [string match "RM_IHPSG13_1P_*" [$master getName]] } {
+            lappend sram_masters [$master getName]
+        }
+    }
+}
 
 define_pdn_grid \
     -macro \
-    -cells "\
-    RM_IHPSG13_1P_2048x32_c2_bm_bist \
-    RM_IHPSG13_1P_4096x8_c3_bm_bist \
-    RM_IHPSG13_1P_4096x16_c3_bm_bist \
-    RM_IHPSG13_1P_256x48_c2_bm_bist" \
+    -cells $sram_masters \
     -name sram \
     -starts_with POWER
 
