@@ -1,4 +1,4 @@
-# sg13cmos5l.lvs from IHP-Open-PDK (/opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/), patched for the
+# sg13cmos5l.lvs from IHP-Open-PDK (/scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/), patched for the
 # hdc_chip_top full-chip LVS:
 #  - rule_decks includes point to the PDK (28 includes, absolute paths)
 #  - after `align`, apply_hard_ip (hard_ip.rb) replaces the deck's
@@ -102,7 +102,7 @@ end
 #---------------- SRAM SUPPORT ------------------
 #================================================
 
-# %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/sram_integration.lvs
+# %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/sram_integration.lvs
 
 #================================================
 #------------------ SWITCHES --------------------
@@ -235,7 +235,7 @@ end
 # --------------- CUSTOM CLASSES ----------------
 #================================================
 
-# %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/custom_classes.lvs
+# %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/custom_classes.lvs
 
 # Instantiate a reader using the new delegate
 reader = RBA::NetlistSpiceReader.new(CustomReader.new)
@@ -301,7 +301,7 @@ else
   #------------- LAYERS DEFINITIONS ---------------
   #================================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/layers_definitions.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/layers_definitions.lvs
 
   #================================================
   #-------- CMOS5L FORBIDDEN LAYER CHECK ----------
@@ -310,7 +310,7 @@ else
   # This ensures users are warned if their design contains
   # layers that are prohibited in CMOS5L (nBuLay, Metal5, etc.)
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cmos5l_forbidden_check.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cmos5l_forbidden_check.lvs
 
   #================================================
   #------------- LAYERS DERIVATIONS ---------------
@@ -322,7 +322,7 @@ else
   # ------ GENERAL DERIVATIONS ------
   #==================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/general_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/general_derivations.lvs
 
   #==================================
   # ----- CMOS5L STACK OVERRIDES ----
@@ -347,64 +347,64 @@ else
   # ------ MOSFET DERIVATIONS -------
   #==================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/mos_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/mos_derivations.lvs
 
   #==================================
   # ----- RF-MOSFET DERIVATIONS -----
   #==================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/rfmos_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/rfmos_derivations.lvs
 
   #================================
   # ------ BJT DERIVATIONS --------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/bjt_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/bjt_derivations.lvs
 
   #================================
   # ----- DIODE DERIVATIONS -------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/diode_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/diode_derivations.lvs
 
   #================================
   # ---- RESISTOR DERIVATIONS -----
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/res_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/res_derivations.lvs
 
   #==================================
   # -------- CAP DERIVATIONS --------
   #==================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_derivations.lvs
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_svaricap_cmos5l.lvs
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_cmomi_derivations.lvs
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_cmomf_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_svaricap_cmos5l.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_cmomi_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_cmomf_derivations.lvs
 
   #================================
   # ------ ESD DERIVATIONS --------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/esd_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/esd_derivations.lvs
 
   #=================================
   # ----- Inductor DERIVATIONS -----
   #=================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/ind_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/ind_derivations.lvs
 
   #================================
   # ------ Taps DERIVATIONS -------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/tap_derivations.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/tap_derivations.lvs
 
   #================================================
   #------------ DEVICES CONNECTIVITY --------------
   #================================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/devices_connections.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/devices_connections.lvs
 
   #================================================
   #------------- DEVICES EXTRACTION ---------------
@@ -418,7 +418,7 @@ else
 
   cheat(SRAM_SHAREDSD_CELLS) {
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/mos_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/mos_extraction.lvs
 
   }
 
@@ -426,54 +426,54 @@ else
   # ---- RF-MOSFET EXTRACTION -----
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/rfmos_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/rfmos_extraction.lvs
 
   #================================
   # ------- BJT EXTRACTION --------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/bjt_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/bjt_extraction.lvs
 
   #================================
   # ------ DIODE EXTRACTION -------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/diode_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/diode_extraction.lvs
 
   #================================
   # ---- RESISTOR EXTRACTIONS -----
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/res_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/res_extraction.lvs
 
   #==================================
   # --------- CAP EXTRACTION --------
   #==================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/cap_extraction.lvs
 
   #================================
   # ------- ESD EXTRACTION --------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/esd_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/esd_extraction.lvs
 
   #=================================
   # ----- Inductor EXTRACTIONS -----
   #=================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/ind_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/ind_extraction.lvs
 
   #================================
   # ------- Taps EXTRACTIONS ------
   #================================
 
-  # %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/tap_extraction.lvs
+  # %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/tap_extraction.lvs
 end
 
 # RF MOS model mapping
 logger.info('Starting SG13CMOS5L LVS RF MOS Model Mapping')
-# %include /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/rfmos_model_mapping.lvs
+# %include /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/lvs/rule_decks/rfmos_model_mapping.lvs
 
 #==================================================
 # ------------ COMPARISON PREPARATIONS ------------

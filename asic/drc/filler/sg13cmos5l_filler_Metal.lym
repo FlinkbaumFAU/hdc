@@ -132,10 +132,16 @@
 		end
 	end
 
+	# Project change (asic/drc/filler): M2/M3 default spacing tightened from the
+	# PDK's 1.5/2.0 um towards the M2fil.b/M3fil.b minimum (0.42 um) to close the
+	# M2Fil.h/M3Fil.h local-density violations seen over the top SRAM row
+	# (windows (800,800)-(1600,1600) and (400,800)-(1200,1600), ~23.6-24.8%
+	# vs. the 25% minimum): that area's real routing density is too low for the
+	# stock spacing's fill pattern to reach 25% on its own.
 	distances = {
 		'distance_m1' => 1.5,
-		'distance_m2' => 1.5,
-		'distance_m3' => 2.0,
+		'distance_m2' => 0.5,
+		'distance_m3' => 0.5,
 		'distance_m4' => 2.0,
 		'distance_tm1' => 3.05
 	}

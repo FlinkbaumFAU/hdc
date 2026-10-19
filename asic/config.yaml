@@ -38,6 +38,17 @@ meta:
     # re-routed by the step.
     +OpenROAD.CheckAntennas: Odb.InsertECODiodes
 
+    # ECO hold buffers on the SPI input shift register (INSERT_ECO_BUFFERS),
+    # right after post-GRT resizer timing repair and before detailed routing,
+    # so DetailedRouting routes their nets normally. repair_timing -hold
+    # already runs here (PL_/GRT_RESIZER_HOLD_SLACK_MARGIN) but plateaus well
+    # short of closing these: confirmed standalone (same GRT-stage parasitics)
+    # that repeated repair_timing -hold calls, even at a much larger margin,
+    # report "No hold violations found" while find_timing_paths independently
+    # shows real negative slack remaining -- an OpenROAD resizer limitation on
+    # this topology, not a margin problem. See INSERT_ECO_BUFFERS below.
+    +OpenROAD.ResizerTimingPostGRT: Odb.InsertECOBuffers
+
 DESIGN_NAME: hdc_chip_top
 
 # asic/rtl replaces the FPGA memory files from the repo root.
@@ -165,26 +176,48 @@ PDN_MACRO_CONNECTIONS:
 # 0.064 pF), SRAM input slew and clock-tree buffers. So: more headroom after
 # placement, plus design and timing repair on global-routing parasitics
 # (both off by default in the Classic/Chip flow).
+#
+# *_MAX_WIRE_LENGTH defaults to 0, which (per OpenROAD/LibreLane) disables
+# repair_design's only buffer-insertion mechanism entirely, leaving it to
+# fix slew/cap violations by upsizing the driver alone -- which cannot help
+# when the driver is a fixed SRAM macro pin. Standalone repro against the
+# post-GRT odb (openroad -exit, repair_design with the real libs/corners)
+# confirmed: at 0 the SRAM A_DOUT[19] max-cap violator (the worst one, 0.097
+# vs. 0.064 pF) and the A_WEN row-fanout slew violator are untouched (0
+# buffers inserted anywhere, over the whole design, regardless of margin);
+# with a nonzero length a buffer lands right at A_DOUT[19] splitting its two
+# loads, and another splits the A_WEN fanout across the SRAM row -- the
+# exact two violation patterns below. First tried at 300um: cut post-route
+# max-cap violators from 22 to 4 and max-slew from 12 to 0-4 (by corner),
+# but didn't fully clear them -- repair_design only ever buffers nets its
+# length check flags as "too long", so a violator on a short/already-tight
+# net is untouched regardless of margin. Lowered to 150 (smaller = more
+# nets qualify as "too long" = more aggressive) to try to catch the rest;
+# OpenROAD's own RC-optimal threshold for this library/corner is ~4675um,
+# but that's a delay-optimality number, not the SRAM output's hard
+# capacitance limit, so buffering well below it is still the correct fix.
 DESIGN_REPAIR_MAX_SLEW_PCT: 30
 DESIGN_REPAIR_MAX_CAP_PCT: 30
+DESIGN_REPAIR_MAX_WIRE_LENGTH: 150
 RUN_POST_GRT_DESIGN_REPAIR: true
 GRT_DESIGN_REPAIR_MAX_SLEW_PCT: 20
 GRT_DESIGN_REPAIR_MAX_CAP_PCT: 20
+GRT_DESIGN_REPAIR_MAX_WIRE_LENGTH: 150
 RUN_POST_GRT_RESIZER_TIMING: true
 # Hold margin against post-route clock skew: global routing sometimes sends a
 # clock net around the bottom SRAM row (chip6: +1.5 mm, +0.33 ns skew, fast
 # hold -0.2 ns), which pre-route hold repair can't see. Defaults 0.1 / 0.05.
-PL_RESIZER_HOLD_SLACK_MARGIN: 0.3
-GRT_RESIZER_HOLD_SLACK_MARGIN: 0.3
+# 0.3 wasn't enough on this chip either: signoff (post-DRT) hold WNS came in
+# at -0.17/-0.20/-0.12 ns (typ/fast/slow) with it -- same "repair runs before
+# the parasitics that actually cause the problem are known" gap as the
+# slew/cap issue above, just with no equivalent post-route repair pass to
+# fall back on. Raised to 0.5 to see if more pre-route headroom absorbs it.
+PL_RESIZER_HOLD_SLACK_MARGIN: 0.5
+GRT_RESIZER_HOLD_SLACK_MARGIN: 0.5
 
 # Keep clock buffers off the SRAMs. (Clock leaf buffers drive ~20 flops each,
 # which shows up as max-fanout, not slew, violations in the STA report.)
 CTS_OBSTRUCTION_AWARE: true
-
-# Metal/Activ fill: the PDK filler.py runs flat and ran out of memory (~30 GB,
-# killed) on this chip. drc/filler/ runs the PDK fill macros in deep mode:
-# ~1.7 GB, ~4.5 h. Fill cells land in the top cell only.
-KLAYOUT_FILLER_SCRIPT: dir::drc/filler/filler_deep.py
 
 # Antenna repair
 DIODE_CELL: sg13cmos5l_antennanp/A
@@ -198,8 +231,8 @@ DRT_ANTENNA_REPAIR_MARGIN: 30
 # paths: pdk_dir:: expands to a list, which this str-only option rejects.
 KLAYOUT_ANTENNA_RUNSET: dir::drc/antenna_cmos5l_pr990.drc
 KLAYOUT_ANTENNA_OPTIONS:
-  drc_json_default: /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/drc/rule_decks/sg13cmos5l_tech_default.json
-  drc_json: /opt/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/python/sg13cmos5l_pycell_lib/sg13cmos5l_tech_mod.json
+  drc_json_default: /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/tech/drc/rule_decks/sg13cmos5l_tech_default.json
+  drc_json: /scratch/IHP-Open-PDK/ihp-sg13cmos5l/libs.tech/klayout/python/sg13cmos5l_pycell_lib/sg13cmos5l_tech_mod.json
 
 # Tech LEF with the metal cumulative antenna ratio lowered 200 -> 195, so
 # OpenROAD's checks/repairs keep a margin for the cell pins' own Metal1,
@@ -208,6 +241,19 @@ TECH_LEFS:
   "nom_*": dir::lef/sg13cmos5l_tech_ant195.lef
   "min_*": dir::lef/sg13cmos5l_tech_ant195.lef
   "max_*": dir::lef/sg13cmos5l_tech_ant195.lef
+
+# The stock PDK filler (default; RAM is no longer tight enough on this
+# machine to need the flattened-macro deep-mode workaround in drc/filler/)
+# left the two 800x800um density-check windows over the top SRAM row
+# (counters/AM, y:800-1600) at 23.6-24.8% M2/M3 coverage vs. the 25% minimum
+# (M2Fil.h/M3Fil.h, 4 errors, unchanged since the first full run): real
+# routing there is only ~12-18%, and the stock 1.5um(M2)/2.0um(M3) filler-cell
+# spacing can't pack enough filler into the rest to close a ~0.25-1.35%
+# gap. drc/filler/sg13cmos5l_filler_Metal.lym tightens M2/M3 spacing to
+# 0.5um (still above the M2fil.b/M3fil.b 0.42um minimum); confirmed via
+# KLayout.Filler + KLayout.Density standalone on full-test-v5's post-route
+# GDS: M2/M3 coverage in both windows rises to 32-35%, zero density errors.
+KLAYOUT_FILLER_SCRIPT: dir::drc/filler/filler_deep.py
 
 # ECO diodes on every functional SRAM input (clock, address, data, enables;
 # tie-driven bits skipped): long nets from the logic channel into the macros
@@ -629,6 +675,90 @@ INSERT_ECO_DIODES:
     placement: [419.66, 753.46]
   - target: "i_core.accel_unit.im.u_mem.g_1024.u_lo.g_banks:1.g_cols:1.u_macro.g_1024x32.u_mem/A_DIN[31]"
     placement: [408.42, 753.46]
+
+# Manual hold fix for the SPI input shift register (i_core.u_spi.u_spi.in_shift,
+# instances named _23641_ through _23673_ in the post-synthesis netlist): each
+# bit's D pin is fed by a small mux (hold-feedback or shift-in from the
+# neighboring bit) with near-zero combinational delay, so clock-tree skew
+# between sclk leaf buffers dominates and produces hold violations -- real
+# even at the typ corner (worst-case slack only +0.048ns on full-test-v5,
+# before this fix) and confirmed negative at the fast corner (worst -0.054ns,
+# 31 endpoints, see runs/full-test-v5/50-openroad-stapostpnr/*/violator_list.rpt).
+# repair_timing -hold (PL_/GRT_RESIZER_HOLD_SLACK_MARGIN) cannot close this: it
+# plateaus at the same ~-0.05ns residual regardless of margin (tested 0.2
+# through 2.0, the latter causing a non-convergent runaway with 11000+ useless
+# buffer insertions), and repeated calls report "No hold violations found"
+# despite find_timing_paths independently confirming a real violation --
+# detection isn't the issue (no wire-length-style blind spot here, unlike
+# DESIGN_REPAIR_MAX_WIRE_LENGTH above), the resizer just won't push further on
+# this topology. One sg13cmos5l_dlygate4sd3_1 (purpose-built PDK hold-delay
+# cell, ~0.24-0.5ns depending on load) inserted on each violating D pin adds
+# comfortable positive margin at every corner, well within the 100ns sclk
+# period. Regenerate this list if the shift register's synthesis instance
+# names change (e.g. after a VHDL_FILES or synthesis-tool change).
+INSERT_ECO_BUFFERS:
+  - target: "_23641_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23642_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23643_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23644_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23645_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23646_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23647_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23648_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23649_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23650_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23651_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23652_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23653_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23654_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23655_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23656_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23657_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23658_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23659_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23660_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23661_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23662_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23663_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23665_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23666_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23667_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23668_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23669_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23670_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23672_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
+  - target: "_23673_/D"
+    buffer: sg13cmos5l_dlygate4sd3_1
 
 # SRAM macros and placement: generated by scripts/gen_macros_eco.py (see there).
 MACROS:
